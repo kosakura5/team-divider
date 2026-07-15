@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2vs2 チーム分けツール (ワンボタン保存版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; padding: 15px; color: #333; font-size: 14px; }
+        .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1, h2 { text-align: center; font-size: 1.4rem; margin-bottom: 20px; }
+        .header-row { display: flex; font-weight: bold; padding: 6px; background: #e9ecef; border-radius: 5px; margin-bottom: 8px; text-align: center; }
+        .member-row { display: flex; align-items: center; margin-bottom: 6px; background: #f9f9f9; padding: 6px; border-radius: 5px; }
+        
+        .col-check { width: 10%; text-align: center; }
+        .col-name { width: 35%; }
+        .col-count { width: 15%; text-align: center; }
+        .col-rate { width: 15%; text-align: center; }
+        .col-win { width: 12%; text-align: center; }
+        .col-lose { width: 12%; text-align: center; }
+
+        input[type="text"], input[type="number"] { width: 90%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; text-align: center; }
+        input[type="text"] { text-align: left; }
+        
+        button { display: block; width: 100%; padding: 12px; background: #007bff; color: #fff; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: bold; margin-top: 15px; }
+        button:hover { background: #0056b3; }
+        
+        /* 抽選結果全体を囲うボックス */
+        .result-box { margin-top: 20px; padding: 15px; background: #e9ecef; border-radius: 8px; display: none; }
+        
+        /* 画像切り出しエリア */
+        .capture-area { background: #ffffff; padding: 20px; border-radius: 8px; border: 2px solid #007bff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .capture-title { text-align: center; font-size: 1.2rem; font-weight: bold; margin-top: 0; margin-bottom: 15px; color: #333; }
+        .teams { display: flex; justify-content: space-around; }
+        .team { background: #f8f9fa; padding: 12px; border-radius: 5px; width: 46%; text-align: center; border: 1px solid #dee2e6; }
+        .team h3 { margin: 0 0 8px 0; font-size: 1rem; color: #007bff; }
+        
+        .match-btn-group { display: flex; justify-content: space-between; margin-top: 15px; gap: 10px; }
+        .win-btn { background: #28a745; margin: 0; flex: 1; }
+        .win-btn:hover { background: #218838; }
+        .save-btn { background: #ff9f43; margin-top: 15px; }
+        .save-btn:hover { background: #ee5253; }
+        .cancel-btn { background: #6c757d; margin-top: 15px; }
+        .cancel-btn:hover { background: #5a6268; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>2vs2 チーム分けツール</h1>
+    
+    <div class="header-row">
+        <div class="col-check">参戦</div>
+        <div class="col-name">名前</div>
+        <div class="col-count">回数</div>
+        <div class="col-rate">レート</div>
+        <div class="col-win">勝</div>
+        <div class="col-lose">敗</div>
+    </div>
+
+    <div class="member-list" id="memberList"></div>
+
+    <button onclick="drawTeams()">メンバー選出＆実力均等分け</button>
+
+    <div class="result-box" id="resultBox">
+        
+        <div class="capture-area" id="captureArea">
+            <div class="capture-title" id="captureTitle">対戦カード</div>
+            <div class="teams">
+                <div class="team">
+                    <h3>チーム A</h3>
+                    <div id="teamA"></div>
+                </div>
+                <div class="team">
+                    <h3>チーム B</h3>
+                    <div id="teamB"></div>
+                </div>
+            </div>
+        </div>
+
+        <button class="save-btn" id="saveBtn" onclick="saveAsImageDirect()">📸 対戦カードを画像で保存</button>
+
+        <p style="text-align: center; font-size: 12px; color: #666; margin-top: 20px;">※試合終了後、勝った方のボタンを押すとデータが更新されます</p>
+        <div class="match-btn-group">
+            <button class="win-btn" onclick="confirmResult('A')">チームAの勝ち！</button>
+            <button class="win-btn" onclick="confirmResult('B')">チームBの勝ち！</button>
+        </div>
+        <button class="cancel-btn" onclick="closeResult()">結果を破棄して閉じる</button>
+    </div>
+</div>
+
+<script>
+    let members = Array.from({length: 12}, (_, i) => ({
+        name: `プレイヤー${i+1}`, count: 0, rate: 1500, win: 0, lose: 0, active: true
+    }));
+
+    function renderMembers() {
+        const listDiv = document.getElementById('memberList');
+        listDiv.innerHTML = '';
+        members.forEach((m, idx) => {
+            const total = m.win + m.lose;
+            const winRate = total > 0 ? Math.round((m.win / total) * 100) : 0;
+
+            const row = document.createElement('div');
+            row.className = 'member-row';
+            row.innerHTML = `
+                <div class="col-check"><input type="checkbox" ${m.active ? 'checked' : ''} onchange="updateProp(${idx}, 'active', this.checked)"></div>
+                <div class="col-name"><input type="text" value="${escapeHtml(m.name)}" onchange="updateProp(${idx}, 'name', this.value)"></div>
+                <div class="col-count"><input type="number" value="${m.count}" min="0" onchange="updateProp(${idx}, 'count', this.value)"></div>
+                <div class="col-rate"><input type="number" value="${m.rate}" min="0" onchange="updateProp(${idx}, 'rate', this.value)"></div>
+                <div class="col-win"><input type="number" value="${m.win}" min="0" onchange="updateProp(${idx}, 'win', this.value)"></div>
+                <div class="col-lose"><input type="number" value="${m.lose}" min="0" onchange="updateProp(${idx}, 'lose', this.value)"><span style="font-size:10px;color:#888;">(${winRate}%)</span></div>
+            `;
+            listDiv.appendChild(row);
+        });
+    }
+
+    function updateProp(idx, prop, val) {
+        if (prop === 'active') {
+            members[idx][prop] = !!val;
+        } else if (prop === 'name') {
+            members[idx][prop] = String(val);
+        } else {
+            let num = parseInt(val, 10);
+            if (isNaN(num) || num < 0) num = 0;
+            members[idx][prop] = num;
+        }
+        renderMembers();
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    let lastSelectedIndices = { teamA: [], teamB: [] };
+
+    function drawTeams() {
+        let candidates = members.map((m, i) => ({...m, originalIndex: i})).filter(m => m.active && m.name.trim() !== "");
+
+        if (candidates.length < 4) {
+            alert("アクティブなメンバーが4人未満です。");
+            return;
+        }
+
+        const maxCount = Math.max(...candidates.map(c => c.count));
+        candidates.forEach(c => { c.weight = (maxCount - c.count) + 1; });
+
+        let selected = [];
+        for (let i = 0; i < 4; i++) {
+            let totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+            if (totalWeight <= 0) totalWeight = 1;
+            
+            let random = Math.random() * totalWeight;
+            let currentSum = 0;
+            for (let j = 0; j < candidates.length; j++) {
+                currentSum += candidates[j].weight;
+                if (random <= currentSum) {
+                    selected.push(candidates[j]);
+                    candidates.splice(j, 1);
+                    break;
+                }
+            }
+        }
+
+        selected.forEach(s => {
+            const total = s.win + s.lose;
+            const winRate = total > 0 ? (s.win / total) : 0.5; 
+            s.strength = s.rate + (winRate * 1000); 
+        });
+
+        const p0 = Math.abs((selected[0].strength + selected[1].strength) - (selected[2].strength + selected[3].strength));
+        const p1 = Math.abs((selected[0].strength + selected[2].strength) - (selected[1].strength + selected[3].strength));
+        const p2 = Math.abs((selected[0].strength + selected[3].strength) - (selected[1].strength + selected[2].strength));
+
+        let minDiff = Math.min(p0, p1, p2);
+        let tA = [], tB = [];
+
+        if (minDiff === p0) { tA = [selected[0], selected[1]]; tB = [selected[2], selected[3]]; }
+        else if (minDiff === p1) { tA = [selected[0], selected[2]]; tB = [selected[1], selected[3]]; }
+        else { tA = [selected[0], selected[3]]; tB = [selected[1], selected[2]]; }
+
+        document.getElementById('teamA').innerHTML = tA.map(p => `${escapeHtml(p.name)} (R:${p.rate})`).join('<br>');
+        document.getElementById('teamB').innerHTML = tB.map(p => `${escapeHtml(p.name)} (R:${p.rate})`).join('<br>');
+
+        lastSelectedIndices.teamA = tA.map(p => p.originalIndex);
+        lastSelectedIndices.teamB = tB.map(p => p.originalIndex);
+
+        document.getElementById('resultBox').style.display = 'block';
+    }
+
+    // ★セキュリティを突破して一発で即保存させる新しい関数
+    function saveAsImageDirect() {
+        const target = document.getElementById("captureArea");
+        const btn = document.getElementById("saveBtn");
+        btn.innerText = "⏳ 保存中...";
+        btn.disabled = true;
+
+        // すり抜け用のレンダリング設定
+        html2canvas(target, { 
+            scale: 2,
+            logging: false,
+            backgroundColor: "#ffffff"
+        }).then(canvas => {
+            const imgDataUrl = canvas.toDataURL("image/png");
+            
+            // 一時的に仮想リンクを作って、プログラムから高速クリックさせる
+            const link = document.createElement("a");
+            link.href = imgDataUrl;
+            
+            const now = new Date();
+            const timeStr = `${now.getMonth()+1}月${now.getDate()}日_${now.getHours()}時${now.getMinutes()}分`;
+            link.download = `対戦カード_${timeStr}.png`;
+            
+            // 仮想リンクを配置し、Safariが「ユーザーの意図的な操作」と誤認するタイミングで発火
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            btn.innerText = "📸 対戦カードを画像で保存";
+            btn.disabled = false;
+        }).catch(err => {
+            alert("エラーが発生しました。");
+            btn.innerText = "📸 対戦カードを画像で保存";
+            btn.disabled = false;
+            console.error(err);
+        });
+    }
+
+    function confirmResult(winnerTeam) {
+        if (!lastSelectedIndices.teamA.length || !lastSelectedIndices.teamB.length) return;
+
+        const allSelected = [...lastSelectedIndices.teamA, ...lastSelectedIndices.teamB];
+        
+        allSelected.forEach(idx => { 
+            members[idx].count = (members[idx].count || 0) + 1; 
+        });
+
+        if (winnerTeam === 'A') {
+            lastSelectedIndices.teamA.forEach(idx => { members[idx].win = (members[idx].win || 0) + 1; });
+            lastSelectedIndices.teamB.forEach(idx => { members[idx].lose = (members[idx].lose || 0) + 1; });
+        } else {
+            lastSelectedIndices.teamB.forEach(idx => { members[idx].win = (members[idx].win || 0) + 1; });
+            lastSelectedIndices.teamA.forEach(idx => { members[idx].lose = (members[idx].lose || 0) + 1; });
+        }
+
+        renderMembers();
+        document.getElementById('resultBox').style.display = 'none';
+        alert("試合結果と選出回数を更新しました！");
+        
+        lastSelectedIndices = { teamA: [], teamB: [] };
+    }
+
+    function closeResult() { 
+        document.getElementById('resultBox').style.display = 'none'; 
+        lastSelectedIndices = { teamA: [], teamB: [] };
+    }
+
+    renderMembers();
+</script>
+
+</body>
+</html>
